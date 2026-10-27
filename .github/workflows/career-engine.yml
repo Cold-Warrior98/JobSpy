@@ -32,6 +32,12 @@ jobs:
         run: python career_engine.py --self-test
       - name: Install pinned scraper
         run: pip install --no-cache-dir python-jobspy==1.4.1
+      - name: Install dashboard test browser
+        run: |
+          pip install --no-cache-dir playwright
+          python -m playwright install --with-deps chromium
+      - name: Test dashboard in Chromium
+        run: python career_engine.py --ui-test
       - name: Collect and screen
         env:
           SEARCH_SITES: ${{ inputs.sites }}
