@@ -365,7 +365,7 @@ def main():
     for row in unique:
         row.update(screen(row))
         row.update(freshness(row,args.hours))
-        if row['freshness_status'] != 'Within requested window':
+        if row['decision'] != 'Skip' and row['freshness_status'] != 'Within requested window':
             row['decision'] = 'Skip' if row['freshness_status'] in ['Outside requested window','Future date'] else 'Review'
             row['reason'] = 'Freshness gate: '+row['freshness_status']
         row['record_id'] = hashlib.sha256((canonical(row.get('job_url')) or fingerprint(row)).encode()).hexdigest()[:16]
