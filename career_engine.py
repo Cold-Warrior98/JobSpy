@@ -74,7 +74,12 @@ def self_test():
     assert canonical('https://a.org/job/1?utm_source=x') == canonical('https://a.org/job/1?utm_source=y')
     assert screen(dict(base, description='Experience with Excel. Preferred 5 years. '*10))['experience_floor'] is None
     assert screen(dict(base, description='Minimum 6 months experience. Excel and SQL. '*10))['experience_floor'] is None
-    print('20 screening and deduplication checks passed')
+    assert screen(dict(base, title='Looking For International Voice Process-CTC-5.5LPA'))['decision'] == 'Skip'
+    assert screen(dict(base, title='Immediate requirement For Legal Executive position'))['decision'] == 'Skip'
+    assert screen(dict(base, title='Customer Support Openings'))['decision'] == 'Skip'
+    assert screen(dict(base, title='Data Analyst'))['decision'] == 'Apply candidate'
+    assert screen(dict(base, title='Purchase Executive'))['decision'] == 'Apply candidate'
+    print('25 screening and deduplication checks passed')
 
 
 def experience_signals(row):
@@ -110,16 +115,18 @@ def screen(row):
     gaps = [key for key in GAPS if key in desc]
     signals = experience_signals(row)
     minimum = max((n for n, _ in signals), default=None)
-    relevant = bool(re.search(r'operations|business analyst|supply chain|inventory|planning|procurement|process|program', title))
+    relevant = bool(re.search(r'operations|business analyst|supply chain|inventory|planning|procurement|purchase|process analyst|process improvement|excellence|program operations|data analyst', title))
     decision, reason = 'Review', 'Read JD: experience or requirements not established'
-    if re.search(r'\b(senior|sr\.?|lead|manager|director|head|principal)\b', title):
+    if re.search(r'voice|\bbpo\b|telecall|call cent|customer (support|service)|legal executive|training department|business development|sales executive', title):
+        decision, reason = 'Skip', 'Role family outside operations, analytics and supply-chain transition'
+    elif re.search(r'\b(senior|sr\.?|lead|manager|director|head|principal)\b', title):
         decision, reason = 'Skip', 'Seniority signal outside primary entry-level search; manual override available'
     elif re.search(r'financial operations|middle office|investment|accounting|tax analyst|credit analyst', title):
         decision, reason = 'Skip', 'Finance-focused title outside primary target'
     elif minimum is not None and minimum >= 4:
         decision, reason = 'Skip', 'Source or JD states four or more years minimum experience'
     elif not relevant:
-        reason = 'Role relevance unclear from title'
+        decision, reason = 'Skip', 'No target-role signal in title; available under All records for manual override'
     elif len(desc) < 150:
         reason = 'Missing or short JD; recover description before deciding'
     elif minimum == 3:
@@ -242,6 +249,17 @@ def ui_test():
     print('Dashboard browser tests passed: filtering, empty state, XSS, tracker persistence, backup and restore')
 
 
+
+def configure_sources():
+    import jobspy
+    from jobspy.naukri import Naukri
+    from jobspy.model import Site
+    class EntryNaukri(Naukri):
+        def _search_params(self):
+            return super()._search_params() | {'experience': 1}
+    jobspy.SCRAPER_MAPPING[Site.NAUKRI] = EntryNaukri
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--self-test', action='store_true')
@@ -263,6 +281,7 @@ def main():
             rows = list(csv.DictReader(f))
     else:
         from jobspy import scrape_jobs
+        configure_sources()
         class Capture(logging.Handler):
             def emit(self, record):
                 messages.append(record.getMessage())
@@ -276,7 +295,7 @@ def main():
                         audit.append(dict(site=site,city=city,query=query,status='Skipped after source block',rows=0)); continue
                     messages = []
                     handler = Capture(); logger = logging.getLogger('jobspy.'+site); logger.addHandler(handler)
-                    record = dict(site=site,city=city,query=query,rows=0)
+                    record = dict(site=site,city=city,query=query,rows=0,requested_experience=1 if site=='naukri' else None)
                     started = time.monotonic()
                     try:
                         jobs = scrape_jobs(site_name=[site],search_term=query,location=city,
@@ -315,7 +334,7 @@ def main():
     summary = dict(raw_records=len(rows),unique_records=len(unique),decisions=counts,
                    collection_status='Imported' if args.input else ('No data' if not rows else 'Partial' if any(a['status'] in ['Failed','Partial','Skipped after source block'] for a in audit) else 'Completed'),
                    eligibility_status='Provisional rule-based screening; no live application verification',
-                   tracker_status='Starter file only; preserve your edited tracker separately between runs',audit=audit)
+                   tracker_status='Dashboard browser storage plus export/import backup; CSV starter is separate',audit=audit)
     (out/'audit.json').write_text(json.dumps(summary,indent=2,default=str),encoding='utf-8')
     (out/'report.html').write_text(render_dashboard(unique, summary),encoding='utf-8')
     print(json.dumps({k:v for k,v in summary.items() if k!='audit'},indent=2))
