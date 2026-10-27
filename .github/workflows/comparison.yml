@@ -1,0 +1,54 @@
+name: Scraper Comparison Checks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install LinkedIn specialist from PyPI
+        run: pip install --no-cache-dir linkedin-jobs-scraper==8.0.0
+      - name: Startup and repository checks
+        shell: python
+        run: |
+          import subprocess, json, urllib.request, ast, os
+          from pathlib import Path
+          out = Path('comparison'); out.mkdir()
+          checks = []
+          commands = [['lijs','--version'], ['lijs','jobs','operations analyst','--location','Bengaluru','--experience','entry-level,associate','--time','week','--limit','5','--apply-link','--out-path',str(out/'linkedin.csv')]]
+          for cmd in commands:
+              try:
+                  result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                  entry = dict(command=cmd, exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
+              except Exception as exc:
+                  entry = dict(command=cmd, exception=str(exc))
+              checks.append(entry)
+              print(json.dumps(entry), flush=True)
+          for repo in ['anandanair/job-scraper','PaulMcInnis/JobFunnel']:
+              req = urllib.request.Request('https://api.github.com/repos/'+repo, headers={'User-Agent':'scraper-evaluation'})
+              meta = json.load(urllib.request.urlopen(req, timeout=20))
+              entry = dict(repository=repo, archived=meta['archived'], default_branch=meta['default_branch'])
+              names = ['scraper.py','config.py','requirements.txt'] if repo.startswith('anandanair') else ['readme.md','pyproject.toml']
+              for name in names:
+                  url = 'https://raw.githubusercontent.com/'+repo+'/'+meta['default_branch']+'/'+name
+                  source = urllib.request.urlopen(url, timeout=20).read().decode()
+                  (out / (repo.replace('/','_')+'_'+name)).write_text(source)
+                  if name.endswith('.py'):
+                      tree = ast.parse(source)
+                      entry[name] = dict(syntax='parsed', functions=[n.name for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))], imports=[ast.unparse(n) for n in tree.body if isinstance(n,(ast.Import,ast.ImportFrom))])
+                  else:
+                      entry[name] = source[:14000]
+              checks.append(entry)
+              print(json.dumps(entry), flush=True)
+          (out/'checks.json').write_text(json.dumps(checks,indent=2))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scraper-comparison
+          path: comparison/
+          retention-days: 7
