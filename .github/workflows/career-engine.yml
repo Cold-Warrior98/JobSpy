@@ -11,7 +11,7 @@ on:
         description: Posting age in hours
         type: choice
         options: ["24", "72", "168"]
-        default: "168"
+        default: "24"
 permissions:
   contents: read
 concurrency:
