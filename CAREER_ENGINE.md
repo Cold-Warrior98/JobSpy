@@ -1,42 +1,47 @@
-# Career Search Engine
+# Career Mission Control
 
-A manual, rule-based review assistant around JobSpy. No auto-apply, messages, AI APIs, credentials, or scheduled runs.
+Manual Indian job-search and review workspace built around JobSpy. No submissions, messages, credential uploads, paid AI APIs or scheduled runs.
 
-## Run on GitHub
+## Use
 
-Open Actions > Career Search Engine > Run workflow. Choose Naukri or Naukri + LinkedIn and a 24/72/168-hour search window. The workflow searches six role families across Bengaluru and Hyderabad, requesting five results per search. Source filters and dates are not independently verified.
+1. Open Actions > Career Search Engine > Run workflow. Choose Naukri (default) or Naukri + LinkedIn, and 24/72/168 hours.
+2. Download the career-results artifact within 14 days and extract it.
+3. Open report.html. Filter by city, role text, screening suggestion and application status. Expand collected JDs and follow the original source links.
+4. Change application status and add notes yourself after taking action. Changes save in your browser when storage is available.
+5. Export tracker backup before clearing browser data or moving files. Import that JSON backup into the next report to restore your history. Retained history does not trigger applications or messages.
 
-Download the career-results artifact within 14 days. Open report.html for the overview and review_queue.csv in Excel. CSVs use UTF-8 BOM and neutralise formula-like cell values.
+## What a result means
+
+Apply candidate is a provisional suggestion based on an entry-level experience signal and at least two keyword evidence matches. It does not establish all mandatory qualifications, domain experience or employer acceptance. Stretch means a three-year minimum was parsed. Review includes incomplete data, potential gaps and uncertain role relevance. Skip is a conservative rule-based exclusion and can be wrong. All records remain available under All records.
+
+Experience is read from structured source fields and explicit JD statements; preferred experience is treated separately. Evidence descriptions distinguish academic/project exposure from professional experience. Rules never invent experience or selection probabilities.
+
+## Page checks
+
+The first 15 non-Skip records receive a normal public HTTP request. Statuses distinguish inaccessible pages, access challenges, explicit unavailability text and accessible pages. A 200 response is NOT proof that applications are still accepted. No challenges are bypassed. Records beyond the cap remain Not checked.
 
 ## Outputs
 
-- raw_jobs.csv: original collected records.
-- screened_jobs.csv: deduplicated records, provisional decisions, reasons, experience excerpts, evidence and gaps.
-- review_queue.csv: records not marked Skip.
-- tracker_starter.csv: blank application-tracking fields. Preserve your edited tracker separately; repeat runs do not merge application history.
-- audit.json: per-search status, logs and errors.
-- report.html: readable static report.
+- report.html: self-contained dashboard with search, filters, JD details, notes and tracker backup/restore.
+- screened_jobs.csv: all deduplicated records and reasons.
+- review_queue.csv: non-Skip records for human review.
+- raw_jobs.csv: collected source records.
+- tracker_starter.csv: alternative CSV template; edited versions are not automatically merged.
+- audit.json: source-level status and logs.
 
-## Meaning of decisions
+CSV exports use UTF-8 BOM for Excel and neutralise formula-like values. Exact job URLs retain meaningful query IDs. Duplicate descriptions can be consolidated when company, title and location also match.
 
-Apply candidate means a parsed entry-level experience signal plus at least two keyword evidence matches. It is NOT a verified eligibility decision. Stretch means three years stated. Review includes unknown requirements, short JDs, unclear relevance and possible skill gaps. Skip covers selected senior titles, finance titles and parsed experience of four years or more. These conservative heuristics can be wrong: review the original JD, including every mandatory requirement.
+## Testing
 
-No source URL or application page is checked for continued availability. Qualification restrictions, language, domain-specific experience, salary, work authorisation and relocation requirements require manual review. Evidence keywords do not establish professional experience. No selection probabilities are generated.
+The workflow runs screening regression tests plus Chromium acceptance tests for filtering, empty state, injection handling, notes, status persistence and backup/restore, before live collection. Test fixtures are synthetic. Live source performance and eligibility remain separate from code-test success.
 
-## Configure
+## Configuration and local use
 
-Edit QUERIES, CITIES, EVIDENCE and GAPS in career_engine.py. Keep private resume details, contacts, credentials and application outcomes out of this public repository.
-
-## Local use
-
-From a Python environment with python-jobspy==1.4.1 installed:
+Edit QUERIES, CITIES, EVIDENCE and GAPS in career_engine.py. Never put private contacts, resume files, credentials or application outcomes in this public repository. Use a D: working folder for local files.
 
     python career_engine.py --self-test
+    python career_engine.py --ui-test
     python career_engine.py --sites naukri --hours 24 --query-count 6 --per-search 5
     python career_engine.py --input existing_jobs.csv
 
-Outputs go to career-results under the current working directory. On Windows, use a D: working folder if local files must stay on D:. Import mode and self-tests use only the Python standard library.
-
-## Failure behaviour
-
-An empty run exits with code 2. Source blocks or errors appear in the audit as Partial/Failed; subsequent queries for a rate-limited source are skipped. A successful GitHub job proves execution completed, not that every source worked or any job is eligible.
+Live collection requires python-jobspy==1.4.1. UI tests require Playwright and its Chromium browser. An empty run exits with code 2; source failures are also recorded in the audit. Runs are bounded to 15 minutes.
