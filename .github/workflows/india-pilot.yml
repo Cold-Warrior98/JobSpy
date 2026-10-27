@@ -1,0 +1,49 @@
+name: India Job Search Pilot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --no-cache-dir python-jobspy==1.4.1
+      - name: Search Indian vacancies
+        shell: python
+        run: |
+          import json, time
+          from pathlib import Path
+          import pandas as pd
+          from jobspy import scrape_jobs
+          out = Path('results')
+          out.mkdir(exist_ok=True)
+          audit, frames = [], []
+          for site in ['linkedin', 'naukri']:
+              for city in ['Bengaluru', 'Hyderabad']:
+                  record = dict(site=site, city=city)
+                  try:
+                      jobs = scrape_jobs(site_name=[site], search_term='operations analyst', location=city, results_wanted=10, hours_old=168, country_indeed='India', fetch_description=True)
+                      record.update(rows=len(jobs), errors=jobs.attrs.get('errors', {}), warnings=jobs.attrs.get('warnings', {}))
+                      jobs.to_csv(out / f'{site}_{city}.csv', index=False)
+                      if not jobs.empty:
+                          frames.append(jobs)
+                  except Exception as exc:
+                      record['exception'] = str(exc)
+                  audit.append(record)
+                  print(json.dumps(record, default=str), flush=True)
+                  time.sleep(5)
+          (out / 'audit.json').write_text(json.dumps(audit, indent=2, default=str))
+          if frames:
+              unique = pd.concat(frames, ignore_index=True).drop_duplicates(subset=['job_url'])
+              unique.to_csv(out / 'unique_jobs.csv', index=False)
+              print(unique[['site','title','company','location','job_url']].to_string(index=False))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: india-job-pilot
+          path: results/
+          retention-days: 7
