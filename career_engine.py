@@ -269,8 +269,10 @@ def ui_test():
             page.get_by_label('Search jobs',exact=True).fill('Inventory Analyst')
             assert page.locator('article').count()==1
             page.get_by_label('Application status for Inventory Analyst',exact=True).select_option('Applied')
+            page.wait_for_function("JSON.parse(localStorage.getItem('career-tracker-v2')||'{}').fixture1?.status === 'Applied'")
             page.get_by_label('Notes for Inventory Analyst',exact=True).fill('Follow up Friday')
             page.get_by_label('Notes for Inventory Analyst',exact=True).press('Tab')
+            page.wait_for_function("JSON.parse(localStorage.getItem('career-tracker-v2')||'{}').fixture1?.notes === 'Follow up Friday'")
             page.reload()
             page.get_by_label('Search jobs',exact=True).fill('Inventory Analyst')
             assert page.get_by_label('Application status for Inventory Analyst',exact=True).input_value()=='Applied'
