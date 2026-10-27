@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit, urlunsplit
 
 QUERIES = ['operations analyst', 'business operations analyst', 'business analyst',
@@ -79,7 +79,15 @@ def self_test():
     assert screen(dict(base, title='Customer Support Openings'))['decision'] == 'Skip'
     assert screen(dict(base, title='Data Analyst'))['decision'] == 'Apply candidate'
     assert screen(dict(base, title='Purchase Executive'))['decision'] == 'Apply candidate'
-    print('25 screening and deduplication checks passed')
+    for span in ['1-6 Yrs', '0-5 years', '1-3 Yrs']:
+        assert screen(dict(base, experience_range=span))['decision'] == 'Review'
+    now = datetime(2026,10,27,12,tzinfo=timezone.utc)
+    assert freshness({'date_posted':'2026-10-27T10:00:00Z'},24,now)['freshness_status'] == 'Within requested window'
+    assert freshness({'date_posted':'2026-10-25'},24,now)['freshness_status'] == 'Outside requested window'
+    assert freshness({'date_posted':'2026-10-26'},24,now)['freshness_status'] == 'Uncertain date precision'
+    assert freshness({},24,now)['freshness_status'] == 'Missing or invalid date'
+    assert freshness({'date_posted':'2026-10-28'},24,now)['freshness_status'] == 'Future date'
+    print('33 screening, deduplication and freshness checks passed')
 
 
 def experience_signals(row):
@@ -107,6 +115,31 @@ def experience_signals(row):
                 break
     return signals
 
+def freshness(row, hours, now=None):
+    """Date-only source values are intervals in UTC, never invented timestamps."""
+    now = now or datetime.now(timezone.utc)
+    raw = clean(row.get('date_posted'))
+    status = 'Missing or invalid date'
+    try:
+        posted = datetime.fromisoformat(raw.replace('Z','+00:00'))
+        if posted.tzinfo is None:
+            posted = posted.replace(tzinfo=timezone.utc)
+        cutoff = now - timedelta(hours=hours)
+        date_only = bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}(?:[ T]00:00:00)?', raw))
+        if posted > now:
+            status = 'Future date'
+        elif date_only and posted < cutoff < posted + timedelta(days=1):
+            status = 'Uncertain date precision'
+        elif posted < cutoff:
+            status = 'Outside requested window'
+        else:
+            status = 'Within requested window'
+    except (ValueError, TypeError):
+        pass
+    return dict(freshness_status=status, requested_hours=hours,
+                freshness_basis='Source date_posted; UTC assumed when timezone absent')
+
+
 def screen(row):
     title = clean(row.get('title')).lower()
     desc = clean(row.get('description')).lower()
@@ -115,6 +148,16 @@ def screen(row):
     gaps = [key for key in GAPS if key in desc]
     signals = experience_signals(row)
     minimum = max((n for n, _ in signals), default=None)
+    ceilings = []
+    for field in ['experience_range','experience','experience_required','description']:
+        value = clean(row.get(field)).lower()
+        if field != 'description' and re.fullmatch(r'\d{1,2}\s*(?:-|–|to)\s*\d{1,2}',value):
+            value += ' years'
+        for part in re.split(r'[\n.;]',value):
+            if field == 'description' and ('experience' not in part or re.search(r'preferred|desirable|advantage|nice.to.have',part)):
+                continue
+            ceilings.extend(int(m.group(2)) for m in re.finditer(r'(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*(?:years?|yrs?)\b',part))
+    maximum = max(ceilings,default=None)
     relevant = bool(re.search(r'operations|business analyst|supply chain|inventory|planning|procurement|purchase|process analyst|process improvement|excellence|program operations|data analyst', title))
     decision, reason = 'Review', 'Read JD: experience or requirements not established'
     if re.search(r'voice|\bbpo\b|telecall|call cent|customer (support|service)|legal executive|training department|business development|sales executive', title):
@@ -131,13 +174,15 @@ def screen(row):
         reason = 'Missing or short JD; recover description before deciding'
     elif minimum == 3:
         decision, reason = 'Stretch', 'Three years stated; confirm flexibility before preparing application'
+    elif maximum is not None and maximum > 2:
+        reason = 'Broad experience range; inspect actual JD before recommending'
     elif gaps:
         reason = 'Potential skill gaps; check which are mandatory'
     elif minimum is not None and minimum <= 2 and len(matched) >= 2:
         decision, reason = 'Apply candidate', 'Entry-level experience signal and evidence overlap; qualification and domain checks still required'
     if not clean(row.get('job_url')):
         decision, reason = 'Review', 'No source URL; cannot act on this record'
-    return dict(decision=decision, reason=reason, experience_floor=minimum,
+    return dict(decision=decision, reason=reason, experience_floor=minimum, experience_ceiling=maximum,
                 experience_evidence=' | '.join(s for _,s in signals), evidence_matches='; '.join(matched),
                 supporting_evidence='; '.join(EVIDENCE[k] for k in matched), gaps_to_check='; '.join(gaps),
                 application_status='Not applied', live_status='Not checked', manual_review_required='Yes')
@@ -197,8 +242,8 @@ function message(s){el('message').textContent=s}function save(){try{localStorage
 function text(tag,value,parent,cls){const n=document.createElement(tag);n.textContent=value||'Not provided';if(cls)n.className=cls;parent.append(n);return n}
 function safeURL(s){try{const u=new URL(s);return /^https?:$/.test(u.protocol)?u.href:null}catch(e){return null}}
 function render(){const q=el('search').value.toLowerCase(),city=el('city').value,d=el('decision').value,s=el('status').value;el('jobs').replaceChildren();let count=0;
-for(const r of rows){const t=tracker[r.record_id]||{},st=allowed.includes(t.status)?t.status:'Not applied';if(q&&!([r.title,r.company,r.description].join(' ').toLowerCase().includes(q)))continue;if(city&&!(String(r.location||'')+' '+String(r.search_city||'')).toLowerCase().includes(city.toLowerCase()))continue;if(d==='active'&&r.decision==='Skip')continue;if(d&&d!=='active'&&r.decision!==d)continue;if(s&&s!==st)continue;count++;
-const card=document.createElement('article');card.className='card';text('span',r.decision,card,'badge');text('h2',r.title,card);text('p',[r.company,r.location||r.search_city,r.date_posted].filter(Boolean).join(' | '),card,'meta');text('p',r.reason,card);const facts=document.createElement('div');facts.className='facts';for(const [label,value] of [['Experience signal',r.experience_evidence],['Your supporting evidence',r.supporting_evidence],['Gaps to inspect',r.gaps_to_check||'No listed gap detected; other requirements still need review'],['Application-page check',r.live_status]]){const box=document.createElement('div');text('b',label,box);text('span',value,box);facts.append(box)}card.append(facts);
+for(const r of rows){const t=tracker[r.record_id]||{},st=allowed.includes(t.status)?t.status:'Not applied';if(q&&!([r.title,r.company,r.description].join(' ').toLowerCase().includes(q)))continue;if(city&&!(String(r.location||'')+' '+String(r.search_city||'')).toLowerCase().includes(city.toLowerCase()))continue;if(d==='active'&&(r.decision==='Skip'||(r.freshness_status&&r.freshness_status!=='Within requested window')))continue;if(d&&d!=='active'&&r.decision!==d)continue;if(s&&s!==st)continue;count++;
+const card=document.createElement('article');card.className='card';text('span',r.decision,card,'badge');text('h2',r.title,card);text('p',[r.company,r.location||r.search_city,r.date_posted].filter(Boolean).join(' | '),card,'meta');text('p',r.reason,card);const facts=document.createElement('div');facts.className='facts';for(const [label,value] of [['Freshness',r.freshness_status],['Experience signal',r.experience_evidence],['Your supporting evidence',r.supporting_evidence],['Gaps to inspect',r.gaps_to_check||'No listed gap detected; other requirements still need review'],['Application-page check',r.live_status]]){const box=document.createElement('div');text('b',label,box);text('span',value,box);facts.append(box)}card.append(facts);
 const actions=document.createElement('div');actions.className='actions';const url=safeURL(r.job_url_direct)||safeURL(r.job_url);if(url){const a=text('a','Open job and verify',actions);a.href=url;a.target='_blank';a.rel='noopener noreferrer'}const label=document.createElement('label');label.textContent='Application status';const select=document.createElement('select');select.setAttribute('aria-label','Application status for '+r.title);for(const v of allowed){const op=document.createElement('option');op.value=v;op.textContent=v;select.append(op)}select.value=st;select.onchange=()=>{tracker[r.record_id]={...t,status:select.value,updated_at:new Date().toISOString()};save();render()};label.append(select);actions.append(label);card.append(actions);
 const notes=document.createElement('textarea');notes.placeholder='Your notes, application date and next follow-up';notes.setAttribute('aria-label','Notes for '+r.title);notes.value=t.notes||'';notes.onchange=()=>{tracker[r.record_id]={...(tracker[r.record_id]||{}),notes:notes.value,updated_at:new Date().toISOString()};save()};card.append(notes);const details=document.createElement('details');text('summary','Read collected job description',details);text('div',r.description||'Description missing. Open the source job.',details,'jd');card.append(details);el('jobs').append(card)}el('count').textContent=count+' shown / '+rows.length+' unique records';el('empty').hidden=count!==0}
 for(const id of ['search','city','decision','status'])el(id).addEventListener(id==='search'?'input':'change',render);
@@ -265,7 +310,7 @@ def main():
     parser.add_argument('--self-test', action='store_true')
     parser.add_argument('--ui-test', action='store_true')
     parser.add_argument('--per-search', type=int, default=5, choices=range(1,21))
-    parser.add_argument('--hours', type=int, default=168, choices=[24,72,168])
+    parser.add_argument('--hours', type=int, default=24, choices=[24,72,168])
     parser.add_argument('--query-count', type=int, default=3, choices=range(1,7))
     parser.add_argument('--sites', default='naukri')
     parser.add_argument('--input', type=Path, help='Screen a local CSV without scraping')
@@ -319,6 +364,10 @@ def main():
     unique = deduplicate(rows)
     for row in unique:
         row.update(screen(row))
+        row.update(freshness(row,args.hours))
+        if row['freshness_status'] != 'Within requested window':
+            row['decision'] = 'Skip' if row['freshness_status'] in ['Outside requested window','Future date'] else 'Review'
+            row['reason'] = 'Freshness gate: '+row['freshness_status']
         row['record_id'] = hashlib.sha256((canonical(row.get('job_url')) or fingerprint(row)).encode()).hexdigest()[:16]
         row['collected_at_utc'] = datetime.now(timezone.utc).isoformat()
     for row in [r for r in unique if r['decision'] != 'Skip'][:15]:
@@ -326,12 +375,12 @@ def main():
     order = {'Apply candidate':0,'Stretch':1,'Review':2,'Skip':3}
     unique.sort(key=lambda r: (order[r['decision']], -len(r['evidence_matches'])))
     write_csv(out/'screened_jobs.csv',unique)
-    shortlist = [r for r in unique if r['decision'] != 'Skip']
+    shortlist = [r for r in unique if r['decision'] != 'Skip' and r['freshness_status'] == 'Within requested window']
     write_csv(out/'review_queue.csv',shortlist)
     tracker_fields = ['record_id','company','title','location','job_url','decision','application_status','applied_date','follow_up_date','outcome','notes']
     write_csv(out/'tracker_starter.csv',shortlist,tracker_fields)
     counts = {d:sum(r['decision']==d for r in unique) for d in order}
-    summary = dict(raw_records=len(rows),unique_records=len(unique),decisions=counts,
+    summary = dict(requested_hours=args.hours, review_queue_records=len(shortlist), freshness_counts={s:sum(r['freshness_status']==s for r in unique) for s in sorted({r['freshness_status'] for r in unique})}, raw_records=len(rows),unique_records=len(unique),decisions=counts,
                    collection_status='Imported' if args.input else ('No data' if not rows else 'Partial' if any(a['status'] in ['Failed','Partial','Skipped after source block'] for a in audit) else 'Completed'),
                    eligibility_status='Provisional rule-based screening; no live application verification',
                    tracker_status='Dashboard browser storage plus export/import backup; CSV starter is separate',audit=audit)
