@@ -42,7 +42,7 @@ jobs:
         env:
           SEARCH_SITES: ${{ inputs.sites }}
           SEARCH_HOURS: ${{ inputs.hours }}
-        run: python career_engine.py --sites "$SEARCH_SITES" --hours "$SEARCH_HOURS" --query-count 6 --per-search 5
+        run: python career_engine.py --sites "$SEARCH_SITES" --hours "$SEARCH_HOURS" --query-count 6 --per-search 20
       - uses: actions/upload-artifact@v4
         if: always()
         with:
