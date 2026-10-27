@@ -1,0 +1,45 @@
+name: Career Search Engine
+on:
+  workflow_dispatch:
+    inputs:
+      sites:
+        description: Sources
+        type: choice
+        options: [naukri, "naukri,linkedin"]
+        default: naukri
+      hours:
+        description: Posting age in hours
+        type: choice
+        options: ["24", "72", "168"]
+        default: "168"
+permissions:
+  contents: read
+concurrency:
+  group: career-search
+  cancel-in-progress: false
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify screening rules
+        run: python career_engine.py --self-test
+      - name: Install pinned scraper
+        run: pip install --no-cache-dir python-jobspy==1.4.1
+      - name: Collect and screen
+        env:
+          SEARCH_SITES: ${{ inputs.sites }}
+          SEARCH_HOURS: ${{ inputs.hours }}
+        run: python career_engine.py --sites "$SEARCH_SITES" --hours "$SEARCH_HOURS" --query-count 6 --per-search 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: career-results
+          path: career-results/
+          retention-days: 14
